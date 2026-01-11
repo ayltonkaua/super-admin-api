@@ -14,7 +14,8 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
 
-const app = new Hono().basePath('/api');
+// No basePath - Vercel handles routing via rewrites
+const app = new Hono();
 
 // CORS
 app.use('*', cors({
@@ -24,11 +25,11 @@ app.use('*', cors({
     credentials: true,
 }));
 
-// Health check
-app.get('/health', (c) => c.json({ status: 'ok', service: 'super-admin-api' }));
+// Health check - accessible at /api/health
+app.get('/api/health', (c) => c.json({ status: 'ok', service: 'super-admin-api' }));
 
-// Auth Login
-app.post('/v1/auth/login', async (c) => {
+// Auth Login - accessible at /api/v1/auth/login
+app.post('/api/v1/auth/login', async (c) => {
     try {
         const { email, password } = await c.req.json();
 
@@ -72,7 +73,7 @@ app.post('/v1/auth/login', async (c) => {
 });
 
 // Stats
-app.get('/v1/stats', async (c) => {
+app.get('/api/v1/stats', async (c) => {
     try {
         const authHeader = c.req.header('Authorization');
         if (!authHeader?.startsWith('Bearer ')) {
@@ -112,7 +113,7 @@ app.get('/v1/stats', async (c) => {
 });
 
 // Get Escolas
-app.get('/v1/escolas', async (c) => {
+app.get('/api/v1/escolas', async (c) => {
     try {
         const status = c.req.query('status');
         const search = c.req.query('search');
@@ -137,7 +138,7 @@ app.get('/v1/escolas', async (c) => {
 });
 
 // Aprovar Escola
-app.patch('/v1/escolas/:id/aprovar', async (c) => {
+app.patch('/api/v1/escolas/:id/aprovar', async (c) => {
     try {
         const id = c.req.param('id');
         const { error } = await supabase
@@ -153,7 +154,7 @@ app.patch('/v1/escolas/:id/aprovar', async (c) => {
 });
 
 // Rejeitar Escola
-app.patch('/v1/escolas/:id/rejeitar', async (c) => {
+app.patch('/api/v1/escolas/:id/rejeitar', async (c) => {
     try {
         const id = c.req.param('id');
         const { error } = await supabase
