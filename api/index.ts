@@ -104,7 +104,7 @@ app.post('/api/v1/auth/login', async (c) => {
     }
 });
 
-// Stats - with JWT validation and complete data
+// Stats - with error handling for each query
 app.get('/api/v1/stats', async (c) => {
     try {
         const auth = await validateToken(c.req.header('Authorization'));
@@ -114,40 +114,75 @@ app.get('/api/v1/stats', async (c) => {
 
         const today = new Date().toISOString().split('T')[0];
 
-        const [
-            { count: totalEscolas },
-            { count: escolasPendentes },
-            { count: escolasAtivas },
-            { count: escolasRejeitadas },
-            { count: totalAlunos },
-            { count: totalTurmas },
-            { count: totalUsuarios },
-            { count: chamadasHoje },
-        ] = await Promise.all([
-            supabase.from('escola_configuracao').select('*', { count: 'exact', head: true }),
-            supabase.from('escola_configuracao').select('*', { count: 'exact', head: true }).eq('status', 'pendente'),
-            supabase.from('escola_configuracao').select('*', { count: 'exact', head: true }).eq('status', 'aprovada'),
-            supabase.from('escola_configuracao').select('*', { count: 'exact', head: true }).eq('status', 'rejeitada'),
-            supabase.from('alunos').select('*', { count: 'exact', head: true }),
-            supabase.from('turmas').select('*', { count: 'exact', head: true }),
-            supabase.from('user_roles').select('*', { count: 'exact', head: true }),
-            supabase.from('presencas').select('*', { count: 'exact', head: true }).eq('data_chamada', today),
-        ]);
+        // Execute queries individually to catch specific errors
+        const { count: totalEscolas, error: e1 } = await supabase
+            .from('escola_configuracao')
+            .select('*', { count: 'exact', head: true });
+
+        const { count: escolasPendentes, error: e2 } = await supabase
+            .from('escola_configuracao')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'pendente');
+
+        const { count: escolasAtivas, error: e3 } = await supabase
+            .from('escola_configuracao')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'aprovada');
+
+        const { count: escolasRejeitadas, error: e4 } = await supabase
+            .from('escola_configuracao')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'rejeitada');
+
+        const { count: totalAlunos, error: e5 } = await supabase
+            .from('alunos')
+            .select('*', { count: 'exact', head: true });
+
+        const { count: totalTurmas, error: e6 } = await supabase
+            .from('turmas')
+            .select('*', { count: 'exact', head: true });
+
+        const { count: totalUsuarios, error: e7 } = await supabase
+            .from('user_roles')
+            .select('*', { count: 'exact', head: true });
+
+        const { count: chamadasHoje, error: e8 } = await supabase
+            .from('presencas')
+            .select('*', { count: 'exact', head: true })
+            .eq('data_chamada', today);
+
+        // Log errors for debugging (visible in Vercel logs)
+        const errors: string[] = [];
+        if (e1) errors.push(`escola_configuracao: ${e1.message}`);
+        if (e2) errors.push(`escolas pendentes: ${e2.message}`);
+        if (e3) errors.push(`escolas aprovadas: ${e3.message}`);
+        if (e4) errors.push(`escolas rejeitadas: ${e4.message}`);
+        if (e5) errors.push(`alunos: ${e5.message}`);
+        if (e6) errors.push(`turmas: ${e6.message}`);
+        if (e7) errors.push(`user_roles: ${e7.message}`);
+        if (e8) errors.push(`presencas: ${e8.message}`);
+
+        if (errors.length > 0) {
+            console.error('Stats query errors:', errors);
+        }
 
         return c.json({
             success: true,
             data: {
-                totalEscolas: totalEscolas || 0,
-                escolasPendentes: escolasPendentes || 0,
-                escolasAtivas: escolasAtivas || 0,
-                escolasRejeitadas: escolasRejeitadas || 0,
-                totalAlunos: totalAlunos || 0,
-                totalTurmas: totalTurmas || 0,
-                totalUsuarios: totalUsuarios || 0,
-                chamadasHoje: chamadasHoje || 0,
+                totalEscolas: totalEscolas ?? 0,
+                escolasPendentes: escolasPendentes ?? 0,
+                escolasAtivas: escolasAtivas ?? 0,
+                escolasRejeitadas: escolasRejeitadas ?? 0,
+                totalAlunos: totalAlunos ?? 0,
+                totalTurmas: totalTurmas ?? 0,
+                totalUsuarios: totalUsuarios ?? 0,
+                chamadasHoje: chamadasHoje ?? 0,
             },
+            // Include debug info in development
+            _debug: errors.length > 0 ? { errors } : undefined,
         });
     } catch (error: any) {
+        console.error('Stats error:', error);
         return c.json({ success: false, error: error.message }, 500);
     }
 });
