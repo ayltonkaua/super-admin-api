@@ -14,7 +14,6 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
 
-// No basePath - Vercel handles routing via rewrites
 const app = new Hono();
 
 // CORS
@@ -25,10 +24,43 @@ app.use('*', cors({
     credentials: true,
 }));
 
-// Health check - accessible at /api/health
+// Auth middleware - validates JWT token
+async function validateToken(authHeader: string | undefined): Promise<{ valid: boolean; userId?: string }> {
+    if (!authHeader?.startsWith('Bearer ')) {
+        return { valid: false };
+    }
+
+    const token = authHeader.substring(7);
+
+    try {
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+
+        if (error || !user) {
+            return { valid: false };
+        }
+
+        // Check super_admin role
+        const { data: roleData } = await supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', user.id)
+            .eq('role', 'super_admin')
+            .maybeSingle();
+
+        if (!roleData) {
+            return { valid: false };
+        }
+
+        return { valid: true, userId: user.id };
+    } catch {
+        return { valid: false };
+    }
+}
+
+// Health check
 app.get('/api/health', (c) => c.json({ status: 'ok', service: 'super-admin-api' }));
 
-// Auth Login - accessible at /api/v1/auth/login
+// Auth Login
 app.post('/api/v1/auth/login', async (c) => {
     try {
         const { email, password } = await c.req.json();
@@ -72,13 +104,15 @@ app.post('/api/v1/auth/login', async (c) => {
     }
 });
 
-// Stats
+// Stats - with JWT validation and complete data
 app.get('/api/v1/stats', async (c) => {
     try {
-        const authHeader = c.req.header('Authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
+        const auth = await validateToken(c.req.header('Authorization'));
+        if (!auth.valid) {
             return c.json({ success: false, error: 'Não autorizado' }, 401);
         }
+
+        const today = new Date().toISOString().split('T')[0];
 
         const [
             { count: totalEscolas },
@@ -87,6 +121,8 @@ app.get('/api/v1/stats', async (c) => {
             { count: escolasRejeitadas },
             { count: totalAlunos },
             { count: totalTurmas },
+            { count: totalUsuarios },
+            { count: chamadasHoje },
         ] = await Promise.all([
             supabase.from('escola_configuracao').select('*', { count: 'exact', head: true }),
             supabase.from('escola_configuracao').select('*', { count: 'exact', head: true }).eq('status', 'pendente'),
@@ -94,6 +130,8 @@ app.get('/api/v1/stats', async (c) => {
             supabase.from('escola_configuracao').select('*', { count: 'exact', head: true }).eq('status', 'rejeitada'),
             supabase.from('alunos').select('*', { count: 'exact', head: true }),
             supabase.from('turmas').select('*', { count: 'exact', head: true }),
+            supabase.from('user_roles').select('*', { count: 'exact', head: true }),
+            supabase.from('presencas').select('*', { count: 'exact', head: true }).eq('data', today),
         ]);
 
         return c.json({
@@ -105,6 +143,8 @@ app.get('/api/v1/stats', async (c) => {
                 escolasRejeitadas: escolasRejeitadas || 0,
                 totalAlunos: totalAlunos || 0,
                 totalTurmas: totalTurmas || 0,
+                totalUsuarios: totalUsuarios || 0,
+                chamadasHoje: chamadasHoje || 0,
             },
         });
     } catch (error: any) {
@@ -112,9 +152,14 @@ app.get('/api/v1/stats', async (c) => {
     }
 });
 
-// Get Escolas
+// Get Escolas - with alunos/turmas count
 app.get('/api/v1/escolas', async (c) => {
     try {
+        const auth = await validateToken(c.req.header('Authorization'));
+        if (!auth.valid) {
+            return c.json({ success: false, error: 'Não autorizado' }, 401);
+        }
+
         const status = c.req.query('status');
         const search = c.req.query('search');
 
@@ -123,14 +168,29 @@ app.get('/api/v1/escolas', async (c) => {
         if (status) query = query.eq('status', status);
         if (search) query = query.ilike('nome', `%${search}%`);
 
-        const { data, error, count } = await query.order('criado_em', { ascending: false });
+        const { data: escolas, error } = await query.order('criado_em', { ascending: false });
 
         if (error) throw error;
 
+        // Get counts per school
+        const escolasComContagem = await Promise.all(
+            (escolas || []).map(async (escola) => {
+                const [{ count: totalAlunos }, { count: totalTurmas }] = await Promise.all([
+                    supabase.from('alunos').select('*', { count: 'exact', head: true }).eq('escola_id', escola.id),
+                    supabase.from('turmas').select('*', { count: 'exact', head: true }).eq('escola_id', escola.id),
+                ]);
+                return {
+                    ...escola,
+                    totalAlunos: totalAlunos || 0,
+                    totalTurmas: totalTurmas || 0,
+                };
+            })
+        );
+
         return c.json({
             success: true,
-            data: data || [],
-            pagination: { total: count || data?.length || 0 },
+            data: escolasComContagem,
+            pagination: { total: escolasComContagem.length },
         });
     } catch (error: any) {
         return c.json({ success: false, error: error.message }, 500);
@@ -140,6 +200,11 @@ app.get('/api/v1/escolas', async (c) => {
 // Aprovar Escola
 app.patch('/api/v1/escolas/:id/aprovar', async (c) => {
     try {
+        const auth = await validateToken(c.req.header('Authorization'));
+        if (!auth.valid) {
+            return c.json({ success: false, error: 'Não autorizado' }, 401);
+        }
+
         const id = c.req.param('id');
         const { error } = await supabase
             .from('escola_configuracao')
@@ -156,6 +221,11 @@ app.patch('/api/v1/escolas/:id/aprovar', async (c) => {
 // Rejeitar Escola
 app.patch('/api/v1/escolas/:id/rejeitar', async (c) => {
     try {
+        const auth = await validateToken(c.req.header('Authorization'));
+        if (!auth.valid) {
+            return c.json({ success: false, error: 'Não autorizado' }, 401);
+        }
+
         const id = c.req.param('id');
         const { error } = await supabase
             .from('escola_configuracao')
@@ -164,6 +234,27 @@ app.patch('/api/v1/escolas/:id/rejeitar', async (c) => {
 
         if (error) throw error;
         return c.json({ success: true, message: 'Escola rejeitada' });
+    } catch (error: any) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+
+// Deletar Escola
+app.delete('/api/v1/escolas/:id', async (c) => {
+    try {
+        const auth = await validateToken(c.req.header('Authorization'));
+        if (!auth.valid) {
+            return c.json({ success: false, error: 'Não autorizado' }, 401);
+        }
+
+        const id = c.req.param('id');
+        const { error } = await supabase
+            .from('escola_configuracao')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+        return c.json({ success: true, message: 'Escola deletada' });
     } catch (error: any) {
         return c.json({ success: false, error: error.message }, 500);
     }
