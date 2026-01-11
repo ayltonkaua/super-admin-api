@@ -29,9 +29,15 @@ app.use(
             if (origin?.includes('vercel.app')) return origin;
             // Allow custom domain
             if (origin?.includes('chamadadiaria.com.br')) return origin;
+            // Allow if no origin (like curl or server-to-server)
+            if (!origin) return '*';
             return null;
         },
+        allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+        allowHeaders: ['Content-Type', 'Authorization', 'Accept'],
+        exposeHeaders: ['Content-Length', 'X-Request-Id'],
         credentials: true,
+        maxAge: 86400, // Cache preflight for 24 hours
     })
 );
 
