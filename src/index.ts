@@ -2,26 +2,35 @@
  * Super Admin API - Entry Point
  *
  * Hono server for super admin operations.
+ * Works on both Node.js (local) and Vercel (serverless).
  */
 
-import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { handle } from 'hono/vercel';
 
 import { superAdminAuth } from './middleware/auth.js';
 import { auth } from './routes/auth.js';
 import { stats } from './routes/stats.js';
 import { escolas } from './routes/escolas.js';
 
-const app = new Hono();
+const app = new Hono().basePath('/api');
 
 // Global middleware
 app.use('*', logger());
 app.use(
     '*',
     cors({
-        origin: ['http://localhost:5173', 'http://localhost:5174', 'https://*.vercel.app'],
+        origin: (origin) => {
+            // Allow localhost for development
+            if (origin?.includes('localhost')) return origin;
+            // Allow Vercel preview deployments
+            if (origin?.includes('vercel.app')) return origin;
+            // Allow custom domain
+            if (origin?.includes('chamadadiaria.com.br')) return origin;
+            return null;
+        },
         credentials: true,
     })
 );
@@ -30,16 +39,16 @@ app.use(
 app.get('/health', (c) => c.json({ status: 'ok', service: 'super-admin-api' }));
 
 // Public auth routes (no auth required)
-app.route('/api/v1/auth', auth);
+app.route('/v1/auth', auth);
 
 // Protected routes
-const api = new Hono();
-api.use('*', superAdminAuth);
-api.route('/stats', stats);
-api.route('/escolas', escolas);
+const protectedApi = new Hono();
+protectedApi.use('*', superAdminAuth);
+protectedApi.route('/stats', stats);
+protectedApi.route('/escolas', escolas);
 
-// Mount API
-app.route('/api/v1', api);
+// Mount protected API
+app.route('/v1', protectedApi);
 
 // Error handler
 app.onError((err, c) => {
@@ -53,14 +62,21 @@ app.onError((err, c) => {
     );
 });
 
-// Start server
-const port = parseInt(process.env.PORT || '3001');
+// Export for Vercel
+export const GET = handle(app);
+export const POST = handle(app);
+export const PATCH = handle(app);
+export const DELETE = handle(app);
+export const OPTIONS = handle(app);
 
-console.log(`🚀 Super Admin API running on http://localhost:${port}`);
-
-serve({
-    fetch: app.fetch,
-    port,
-});
+// Local development server
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    import('@hono/node-server').then(({ serve }) => {
+        const port = parseInt(process.env.PORT || '3001');
+        console.log(`🚀 Super Admin API running on http://localhost:${port}`);
+        serve({ fetch: app.fetch, port });
+    });
+}
 
 export default app;
+

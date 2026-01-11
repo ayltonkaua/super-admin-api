@@ -2,7 +2,7 @@
     "name": "super-admin-api",
     "version": "1.0.0",
     "description": "API para o painel Super-Admin do ChamadaDiária",
-    "main": "dist/index.js",
+    "type": "module",
     "scripts": {
         "dev": "tsx watch src/index.ts",
         "build": "tsc",
