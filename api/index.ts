@@ -131,7 +131,7 @@ app.get('/api/v1/stats', async (c) => {
             supabase.from('alunos').select('*', { count: 'exact', head: true }),
             supabase.from('turmas').select('*', { count: 'exact', head: true }),
             supabase.from('user_roles').select('*', { count: 'exact', head: true }),
-            supabase.from('presencas').select('*', { count: 'exact', head: true }).eq('data', today),
+            supabase.from('presencas').select('*', { count: 'exact', head: true }).eq('data_chamada', today),
         ]);
 
         return c.json({
