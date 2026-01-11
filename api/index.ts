@@ -123,7 +123,7 @@ app.get('/api/v1/escolas', async (c) => {
         if (status) query = query.eq('status', status);
         if (search) query = query.ilike('nome', `%${search}%`);
 
-        const { data, error, count } = await query.order('created_at', { ascending: false });
+        const { data, error, count } = await query.order('criado_em', { ascending: false });
 
         if (error) throw error;
 
